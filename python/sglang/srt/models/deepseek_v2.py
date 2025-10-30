@@ -608,14 +608,17 @@ class DeepseekV2MoE(nn.Module):
                 not is_packed_weight
                 and self.shared_experts.gate_up_proj.weight.dtype == torch.float8_e4m3fn
             )
-            if self.shared_experts_is_fp8:
-                assert (
-                    self.shared_experts.gate_up_proj.quant_method.quant_config.weight_block_size
-                    == self.shared_experts.down_proj.quant_method.quant_config.weight_block_size
-                )
-                self.shared_experts_weight_block_size = (
-                    self.shared_experts.gate_up_proj.quant_method.quant_config.weight_block_size
-                )
+            # if self.shared_experts_is_fp8:
+
+            
+
+            #     assert (
+            #         self.shared_experts.gate_up_proj.quant_method.quant_config.weight_block_size
+            #         == self.shared_experts.down_proj.quant_method.quant_config.weight_block_size
+            #     )
+            #     self.shared_experts_weight_block_size = (
+            #         self.shared_experts.gate_up_proj.quant_method.quant_config.weight_block_size
+            #     )
 
         self.top_k = config.num_experts_per_tok
 
@@ -859,6 +862,10 @@ class DeepseekV2MoE(nn.Module):
             experts=self.experts,
             alt_stream=self.alt_stream,
         )
+
+        
+
+
         if sbo_shared_output is not None:
             shared_output = sbo_shared_output
 
@@ -872,6 +879,7 @@ class DeepseekV2MoE(nn.Module):
         else:
             if not self.experts.should_fuse_routed_scaling_factor_in_topk:
                 final_hidden_states *= self.routed_scaling_factor
+
 
         return final_hidden_states
 
@@ -2492,6 +2500,9 @@ class DeepseekV2DecoderLayer(nn.Module):
             gemm_output_zero_allocator,
         )
 
+
+        
+
         if should_allreduce_fusion:
             hidden_states._sglang_needs_allreduce_fusion = True
 
@@ -2727,9 +2738,14 @@ class DeepseekV2Model(nn.Module):
             elif self.first_k_dense_replace < normal_start_layer:
                 normal_end_layer = normal_start_layer = 0
 
+
+
+
         for i in range(normal_start_layer, normal_end_layer):
+            
             with get_global_expert_distribution_recorder().with_current_layer(i):
                 layer = self.layers[i]
+   
                 hidden_states, residual = layer(
                     positions,
                     hidden_states,
@@ -2738,6 +2754,7 @@ class DeepseekV2Model(nn.Module):
                     zero_allocator,
                     gemm_output_zero_allocator,
                 )
+
 
         if normal_end_layer != self.end_layer:
             hidden_states, residual = model_forward_maybe_tbo(
@@ -2766,6 +2783,8 @@ class DeepseekV2Model(nn.Module):
                     hidden_states = self.norm(hidden_states)
                 else:
                     hidden_states, _ = self.norm(hidden_states, residual)
+
+        
         return hidden_states
 
 

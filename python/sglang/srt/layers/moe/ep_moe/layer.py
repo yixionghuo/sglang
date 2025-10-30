@@ -52,6 +52,9 @@ if not (_is_npu or _is_hip):
 if _use_aiter:
     from aiter import ActivationType, QuantType
     from aiter.fused_moe import fused_moe
+    import aiter
+    
+    
 
 logger = logging.getLogger(__name__)
 
@@ -120,9 +123,14 @@ class DeepEPMoE(FusedMoE):
 
         if self.deepep_mode.enable_low_latency() and not _is_npu:
             # NPU supports low_latency deepep without deepgemm
-            assert (
-                deep_gemm_wrapper.ENABLE_JIT_DEEPGEMM
-            ), f"DeepEP {self.deepep_mode} mode requires deep_gemm"
+            # assert (
+            #     deep_gemm_wrapper.ENABLE_JIT_DEEPGEMM
+            # ), f"DeepEP {self.deepep_mode} mode requires deep_gemm"
+
+            seeee = 1
+            # print('1')
+
+
         if _use_aiter:
             # expert_mask is of size (self.num_local_experts + 1),
             # the extra 1 is for invalid rank_id (in original deepep, the invalid rank_id is -1, but aiter does not allow -1, we use a mask to make those ids invalid)
@@ -164,7 +172,12 @@ class DeepEPMoE(FusedMoE):
         dispatch_output = self.dispatch(
             hidden_states, topk_idx, topk_weights, forward_batch
         )
+
+
         hidden_states = self.moe_impl(dispatch_output)
+
+
+
         hidden_states = self.combine(
             hidden_states,
             dispatch_output.topk_idx,
@@ -204,7 +217,10 @@ class DeepEPMoE(FusedMoE):
         if _use_aiter:
             assert DispatchOutputChecker.format_is_deepep(dispatch_output)
             # in forward_aiter, we skip token permutation and unpermutation, which have been fused inside aiter kernel
-            return self.forward_aiter(dispatch_output)
+            if self.deepep_mode.enable_low_latency() and not _is_npu:             
+                return self.forward_aiter_low_latency(dispatch_output)
+            else:
+                return self.forward_aiter(dispatch_output)
         if _is_npu:
             assert DispatchOutputChecker.format_is_deepep(dispatch_output)
             return self.forward_npu(dispatch_output)
@@ -231,6 +247,9 @@ class DeepEPMoE(FusedMoE):
         forward_batch: ForwardBatch,
         overlap_args: Optional[Dict[str, Any]] = None,
     ):
+        
+
+
         return self.deepep_dispatcher.combine(
             hidden_states=hidden_states,
             topk_idx=topk_idx,
@@ -239,10 +258,95 @@ class DeepEPMoE(FusedMoE):
             overlap_args=overlap_args,
         )
 
+
+
+    def forward_aiter_low_latency(
+        self,
+        dispatch_output: Union[DeepEPNormalOutput, DeepEPLLOutput],
+    ):
+        
+        hidden_states_fp8, hidden_states_fp8_scale, topk_idx, topk_weights, masked_m = (
+            dispatch_output.hidden_states_fp8[0],
+            dispatch_output.hidden_states_fp8[1],
+            dispatch_output.topk_idx,
+            dispatch_output.topk_weights,
+            dispatch_output.masked_m,
+        )
+        if hidden_states_fp8.shape[0] == 0:
+            return hidden_states_fp8
+        # in original deepep, idx == -1 meaning invalid and will not be processed.
+        # aiter does not accept -1, we use a expert mask to make these idx invalid
+        # (idx == num_local_experts) meaning not used in aiter fused_moe
+        topk_idx_copy = topk_idx.to(torch.int32)
+        topk_idx_copy[topk_idx_copy == -1] = self.num_local_experts
+
+
+        fc1_result = torch.empty(
+                (self.w13_weight.shape[0], hidden_states_fp8.shape[1], self.w13_weight.shape[1]),
+                dtype=torch.bfloat16,
+                device=hidden_states_fp8.device,
+            )
+        
+        output = torch.rand(
+            (self.w13_weight.shape[0], hidden_states_fp8.shape[1], hidden_states_fp8.shape[-1]),
+            dtype=torch.bfloat16,
+            device=hidden_states_fp8.device,
+        )
+
+    
+
+
+        aiter.m_grouped_gemm(
+            hidden_states_fp8,
+            self.w13_weight,
+            fc1_result,
+            masked_m,
+            hidden_states_fp8_scale,
+            self.w13_weight_scale,
+        )
+
+
+        fc1_activation = torch.empty((self.w13_weight.shape[0], hidden_states_fp8.shape[1], self.w2_weight.shape[-1]), 
+                                     device=hidden_states_fp8.device, dtype=torch.bfloat16)
+        aiter.silu_and_mul(fc1_activation, fc1_result)
+
+        
+        q_fc1_struct, fc1_act_int8, fc1_act_scale = self.quantize_3d(fc1_activation, quant_dtype=self.w2_weight.dtype)
+
+               
+
+        
+        aiter.m_grouped_gemm(
+            fc1_act_int8,
+            self.w2_weight,
+            output,
+            masked_m,
+            fc1_act_scale,
+            self.w2_weight_scale,
+        )
+
+        
+        return output
+
+
+    def quantize_3d(self, x, quant_dtype):
+        # x: [B, S, H]
+        B, S, H = x.shape
+        x_flat = x.reshape(B * S, H)
+
+        q_flat, scale = aiter.per_token_quant_hip(x_flat, quant_dtype=quant_dtype)
+
+        q_tensor = q_flat.view(B, S, H)
+        scale_tensor = scale.view(B, S, 1)
+        return 1, q_tensor, scale_tensor
+
+
+
     def forward_aiter(
         self,
         dispatch_output: Union[DeepEPNormalOutput, DeepEPLLOutput],
     ):
+        
         hidden_states, topk_idx, topk_weights = (
             dispatch_output.hidden_states,
             dispatch_output.topk_idx,
