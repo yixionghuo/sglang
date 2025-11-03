@@ -1335,6 +1335,8 @@ def launch_server(
 
         # Send a warmup request - we will create the thread launch it
         # in the lifespan after all other warmups have fired.
+
+        
         warmup_thread = threading.Thread(
             target=_wait_and_warmup,
             args=(
@@ -1392,6 +1394,8 @@ def _execute_server_warmup(
     server_args: ServerArgs,
     pipe_finish_writer: Optional[multiprocessing.connection.Connection],
 ):
+    
+ 
     headers = {}
     url = server_args.url()
     if server_args.api_key:
@@ -1428,16 +1432,36 @@ def _execute_server_warmup(
             "max_new_tokens": max_new_tokens,
         },
     }
+
+
+    # if server_args.skip_tokenizer_init:
+    #     json_data["input_ids"] = [[10, 11, 12] for _ in range(server_args.dp_size)]
+    #     # TODO Workaround the bug that embedding errors for list of size 1
+    #     if server_args.dp_size == 1:
+    #         json_data["input_ids"] = json_data["input_ids"][0]
+    # else:
+    #     json_data["text"] = ["The capital city of France is"] * server_args.dp_size
+    #     # TODO Workaround the bug that embedding errors for list of size 1
+    #     if server_args.dp_size == 1:
+    #         json_data["text"] = json_data["text"][0]
+
+
+
+
+        # 在发送warmup请求前添加限制条件
     if server_args.skip_tokenizer_init:
-        json_data["input_ids"] = [[10, 11, 12] for _ in range(server_args.dp_size)]
-        # TODO Workaround the bug that embedding errors for list of size 1
-        if server_args.dp_size == 1:
-            json_data["input_ids"] = json_data["input_ids"][0]
+        # 减小batch size和sequence length
+        batch_size = min(server_args.dp_size, 2)  # 限制batch size
+        seq_len = 3  # 保持较短的序列长度
+        json_data["input_ids"] = [[10, 11, 12] for _ in range(batch_size)]
     else:
-        json_data["text"] = ["The capital city of France is"] * server_args.dp_size
-        # TODO Workaround the bug that embedding errors for list of size 1
-        if server_args.dp_size == 1:
-            json_data["text"] = json_data["text"][0]
+        # 减小文本长度和batch size
+        batch_size = min(server_args.dp_size, 2)
+        json_data["text"] = ["The"] * batch_size  # 更短的文本
+
+
+
+
 
     # Debug dumping
     if server_args.debug_tensor_dump_input_file:

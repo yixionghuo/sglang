@@ -199,6 +199,9 @@ class DeepEPBuffer:
                     f"Consider using --deepep-config to change the behavior."
                 )
 
+        
+      
+        
         cls._buffer = Buffer(
             group,
             num_nvl_bytes,
@@ -206,7 +209,7 @@ class DeepEPBuffer:
             low_latency_mode=deepep_mode.enable_low_latency(),
             num_qps_per_rank=num_qps_per_rank,
             # TODO can be false when unneeded
-            allow_mnnvl=True,
+            # allow_mnnvl=True,
         )
         return cls._buffer
 
@@ -289,7 +292,7 @@ class _DeepEPDispatcherImplBase:
 
         self.params_bytes = 2
         self.num_max_dispatch_tokens_per_rank = get_int_env_var(
-            "SGLANG_DEEPEP_NUM_MAX_DISPATCH_TOKENS_PER_RANK", 128
+            "SGLANG_DEEPEP_NUM_MAX_DISPATCH_TOKENS_PER_RANK", 64
         )
         # DeepEP internode_ll dispatch uses FINISHED_SUM_TAG=1024
         # and the logic requires num-tokens-sent-from-one-rank-to-another-rank less than it
@@ -592,10 +595,10 @@ class _DeepEPDispatcherImplLowLatency(_DeepEPDispatcherImplBase):
                 ),
                 async_finish=not self.return_recv_hook,
                 return_recv_hook=self.return_recv_hook,
-                round_scale=deep_gemm_wrapper.ENABLE_JIT_DEEPGEMM
-                and deep_gemm_wrapper.DEEPGEMM_BLACKWELL,
-                use_ue8m0=deep_gemm_wrapper.ENABLE_JIT_DEEPGEMM
-                and deep_gemm_wrapper.DEEPGEMM_BLACKWELL,
+                # round_scale=deep_gemm_wrapper.ENABLE_JIT_DEEPGEMM
+                # and deep_gemm_wrapper.DEEPGEMM_BLACKWELL,
+                # use_ue8m0=deep_gemm_wrapper.ENABLE_JIT_DEEPGEMM
+                # and deep_gemm_wrapper.DEEPGEMM_BLACKWELL,
             )
         )
         return packed_recv_hidden, self.packed_recv_count, event, hook
